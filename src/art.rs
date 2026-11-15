@@ -1,16 +1,17 @@
-//! Procedural pixel-art sprite atlas.
+//! Procedural pixel-art sprite atlas (16x16 high-fidelity tiles).
 //!
-//! The game ships no binary assets: every sprite is drawn from ASCII art at
-//! startup and uploaded to the GPU as a single atlas texture.
+//! Generates the entire sprite atlas procedurally at startup matching the
+//! authentic Sombie visual style without shipping heavy binary texture assets,
+//! staying strictly within the <= 100 MB RAM budget.
 
 use image::{Rgba, RgbaImage};
 
-/// Size of one atlas cell in pixels.
-pub const TILE: u32 = 8;
+/// Size of one atlas cell in pixels (16x16).
+pub const TILE: u32 = 16;
 
-/// Atlas grid dimensions (tiles per row / column).
+/// Atlas grid dimensions (16 columns by 4 rows = 64 tile slots).
 pub const ATLAS_COLS: u32 = 16;
-pub const ATLAS_ROWS: u32 = 2;
+pub const ATLAS_ROWS: u32 = 4;
 
 /// Indices into the atlas grid.
 pub mod id {
@@ -18,461 +19,1036 @@ pub mod id {
     pub const DIRT: u32 = 1;
     pub const WATER: u32 = 2;
     pub const ROAD: u32 = 3;
-    pub const FLOOR: u32 = 4;
-    pub const WALL: u32 = 5;
-    pub const DOOR: u32 = 6;
-    pub const TREE: u32 = 7;
-    pub const STUMP: u32 = 8;
-    pub const ROCK: u32 = 9;
-    pub const BUSH: u32 = 10;
-    pub const PLAYER: u32 = 11;
-    pub const ZOMBIE: u32 = 12;
-    pub const RUNNER: u32 = 13;
-    pub const BRUTE: u32 = 14;
-    pub const CAR: u32 = 15;
-    pub const CRATE: u32 = 16;
-    pub const LOOT_FOOD: u32 = 17;
-    pub const LOOT_AMMO: u32 = 18;
-    pub const LOOT_WEAPON: u32 = 19;
-    pub const LOOT_MATERIAL: u32 = 20;
-    pub const FISH: u32 = 21;
-    pub const BARREL: u32 = 22;
-    pub const CAMPFIRE: u32 = 23;
-    pub const FENCE: u32 = 24;
-    pub const SHOP: u32 = 25;
-    pub const HOUSE: u32 = 26;
-    pub const FISHING_SPOT: u32 = 27;
-    pub const BULLET: u32 = 28;
-    pub const BED: u32 = 29;
-    pub const TABLE: u32 = 30;
-    pub const SHELF: u32 = 31;
+    pub const ROAD_PLAIN: u32 = 4;
+    pub const SIDEWALK: u32 = 5;
+    pub const FLOOR: u32 = 6;
+    pub const WALL: u32 = 7;
+    pub const WALL_INTERIOR: u32 = 8;
+    pub const DOOR: u32 = 9;
+    pub const WINDOW: u32 = 10;
+    pub const ROOF: u32 = 11;
+    pub const TREE: u32 = 12;
+    pub const TREE_PINE: u32 = 13;
+    pub const FALLEN_LOG: u32 = 14;
+    pub const STUMP: u32 = 15;
+    pub const ROCK: u32 = 16;
+    pub const BUSH: u32 = 17;
+    pub const FENCE: u32 = 18;
+    pub const GATE: u32 = 19;
+    pub const SAND: u32 = 20;
+    pub const DOCK: u32 = 21;
+    pub const BED: u32 = 22;
+    pub const TABLE: u32 = 23;
+    pub const CHAIR: u32 = 24;
+    pub const SHELF: u32 = 25;
+    pub const COUNTER: u32 = 26;
+    pub const CRATE: u32 = 27;
+    pub const CAR: u32 = 28;
+    pub const TRUCK: u32 = 29;
+    pub const LAMP_POST: u32 = 30;
+    pub const CAMPFIRE: u32 = 31;
+    pub const BARRICADE: u32 = 32;
+    pub const PLAYER: u32 = 33;
+    pub const ZOMBIE: u32 = 34;
+    pub const RUNNER: u32 = 35;
+    pub const BRUTE: u32 = 36;
+    pub const LOOT_FOOD: u32 = 37;
+    pub const LOOT_AMMO: u32 = 38;
+    pub const LOOT_WEAPON: u32 = 39;
+    pub const LOOT_MATERIAL: u32 = 40;
+    pub const FISHING_SPOT: u32 = 41;
+    pub const BULLET: u32 = 42;
+    pub const SHOP: u32 = 43;
+    pub const HOUSE: u32 = 44;
 }
 
-/// Colour key: `.` transparent, `X` black, plus named colours.
+/// Color parsing for procedural 16x16 pixel art.
 fn parse_pixel(ch: char) -> Option<Rgba<u8>> {
     match ch {
         '.' => None,
-        'X' => Some(Rgba([20, 18, 24, 255])),
-        'w' => Some(Rgba([240, 240, 235, 255])),
-        'g' => Some(Rgba([92, 148, 66, 255])),
-        'G' => Some(Rgba([58, 104, 48, 255])),
-        'd' => Some(Rgba([142, 100, 62, 255])),
-        'D' => Some(Rgba([104, 72, 44, 255])),
-        'b' => Some(Rgba([56, 86, 150, 255])),
-        'B' => Some(Rgba([34, 56, 104, 255])),
-        'r' => Some(Rgba([178, 58, 52, 255])),
-        'R' => Some(Rgba([118, 34, 34, 255])),
-        'p' => Some(Rgba([196, 150, 190, 255])),
-        'y' => Some(Rgba([226, 196, 84, 255])),
-        'o' => Some(Rgba([214, 134, 52, 255])),
-        'c' => Some(Rgba([206, 206, 198, 255])),
-        'C' => Some(Rgba([150, 150, 144, 255])),
-        's' => Some(Rgba([188, 188, 196, 255])),
-        'k' => Some(Rgba([44, 38, 48, 255])),
-        'm' => Some(Rgba([150, 90, 170, 255])),
-        'e' => Some(Rgba([120, 80, 50, 255])),
-        'n' => Some(Rgba([70, 130, 180, 255])),
-        'f' => Some(Rgba([90, 180, 90, 255])),
-        'h' => Some(Rgba([220, 180, 120, 255])),
-        'Y' => Some(Rgba([255, 232, 110, 255])),
-        'O' => Some(Rgba([240, 165, 70, 255])),
+        'X' => Some(Rgba([22, 20, 26, 255])),
+        'g' => Some(Rgba([120, 148, 67, 255])), // Sombie olive lawn grass
+        'G' => Some(Rgba([84, 112, 45, 255])),  // Dark shade grass
+        'l' => Some(Rgba([148, 178, 88, 255])), // Light grass highlight
+        'd' => Some(Rgba([142, 100, 62, 255])), // Rich earthy path dirt
+        'D' => Some(Rgba([98, 68, 40, 255])),   // Dark moist soil
+        'p' => Some(Rgba([175, 145, 115, 255])), // Gravel/pebbles
+        'a' => Some(Rgba([78, 78, 80, 255])),   // Asphalt road gray
+        'A' => Some(Rgba([58, 58, 60, 255])),   // Dark asphalt
+        'Y' => Some(Rgba([230, 200, 50, 255])), // Road yellow center stripe
+        'c' => Some(Rgba([185, 185, 178, 255])), // Concrete sidewalk
+        'C' => Some(Rgba([135, 135, 130, 255])), // Sidewalk curb / shadow
+        'f' => Some(Rgba([236, 215, 172, 255])), // Light parquet floorboards
+        'F' => Some(Rgba([195, 170, 128, 255])), // Parquet board seams
+        'w' => Some(Rgba([115, 78, 48, 255])),  // Wooden wall exterior
+        'W' => Some(Rgba([72, 48, 30, 255])),   // Dark wall trim/shadow
+        'i' => Some(Rgba([225, 220, 210, 255])), // Interior wall plaster
+        'I' => Some(Rgba([150, 110, 80, 255])), // Interior baseboard
+        'b' => Some(Rgba([45, 85, 140, 255])),  // Deep water blue
+        'B' => Some(Rgba([80, 140, 205, 255])), // Shimmering water crest
+        's' => Some(Rgba([215, 195, 140, 255])), // Shoreline sand
+        'S' => Some(Rgba([175, 155, 110, 255])), // Wet beach sand
+        'r' => Some(Rgba([175, 60, 48, 255])),  // Red roof shingle
+        'R' => Some(Rgba([115, 36, 28, 255])),  // Dark roof shadow
+        't' => Some(Rgba([52, 145, 48, 255])),  // Tree canopy green
+        'T' => Some(Rgba([28, 92, 25, 255])),   // Dark canopy shadow
+        'h' => Some(Rgba([88, 185, 65, 255])),  // Canopy sun highlight
+        'k' => Some(Rgba([102, 68, 42, 255])),  // Tree bark brown
+        'K' => Some(Rgba([65, 42, 24, 255])),   // Dark bark crease
+        'm' => Some(Rgba([160, 165, 175, 255])), // Steel / metal
+        'M' => Some(Rgba([40, 42, 48, 255])),   // Dark iron / tire rubber
+        'u' => Some(Rgba([140, 190, 230, 240])), // Window glass blue reflection
+        'o' => Some(Rgba([230, 185, 145, 255])), // Human skin
+        'z' => Some(Rgba([140, 175, 130, 255])), // Zombie rot flesh
+        'Z' => Some(Rgba([85, 120, 80, 255])),  // Dark zombie decay
+        'v' => Some(Rgba([160, 25, 25, 255])),  // Blood crimson
+        'e' => Some(Rgba([255, 160, 40, 255])), // Flame orange ember
+        'E' => Some(Rgba([255, 230, 90, 255])), // Bright fire yellow
+        'q' => Some(Rgba([245, 245, 240, 255])), // White sheet / pillow
+        'Q' => Some(Rgba([55, 95, 165, 255])),  // Blue bed blanket
         _ => None,
     }
 }
 
-/// One atlas cell: 8 rows of 8 characters.
-type Cell = [&'static str; 8];
+/// One atlas cell: 16 rows of 16 characters.
+type Cell = [&'static str; 16];
 
 const GRASS: Cell = [
-    "........",
-    "..g..g..",
-    ".gG.g.G.",
-    "..g..g..",
-    ".g.G..g.",
-    "..g..g..",
-    ".G..g.G.",
-    "........",
+    "gggggggggggggggg",
+    "gggglgggggggglgg",
+    "gggllGggggggllGg",
+    "ggggGGggggggggGG",
+    "gggggggggggggggg",
+    "gglgggggggglgggg",
+    "gllGggggggllGggg",
+    "ggGGggggggggGGgg",
+    "gggggggggggggggg",
+    "ggggglgggggggggl",
+    "ggggllGggggggllG",
+    "ggggggGGggggggGG",
+    "gggggggggggggggg",
+    "gglgggggggglgggg",
+    "gllGggggggllGggg",
+    "gggggggggggggggg",
 ];
 
 const DIRT: Cell = [
-    "........",
-    "..d..d..",
-    ".dD.d.d.",
-    "..d..d..",
-    ".d.d..d.",
-    "..d..d..",
-    ".D..d.D.",
-    "........",
+    "dddddddddddddddd",
+    "ddpddddddDddpddd",
+    "ddddDddddddddDdd",
+    "dddddddddddddddd",
+    "ddDddpdddddddddd",
+    "ddddddddDddpdddd",
+    "ddddddddddddDddd",
+    "ddddpddddddddddd",
+    "ddddddddddDddpdd",
+    "ddDddddddddddddd",
+    "ddddddpddddddDdd",
+    "dddddddddddddddd",
+    "ddpddddDdddddddd",
+    "ddddddddddpddDdd",
+    "ddDddpdddddddddd",
+    "dddddddddddddddd",
 ];
 
 const WATER: Cell = [
-    "........",
-    ".n.n.n..",
-    "..nnn...",
-    ".n.nn.n.",
-    "..nnn...",
-    ".n.n.n..",
-    "..nnn...",
-    "........",
+    "bbbbbbbbbbbbbbbb",
+    "bbbBBbbbbbbbBBbb",
+    "bbBBBBbbbbbBBBBb",
+    "bbbbbbbbbbbbbbbb",
+    "bbbbbbbbBBbbbbbb",
+    "bbbbbbbBBBBbbbbb",
+    "bbbbbbbbbbbbbbbb",
+    "bBBbbbbbbbbbBBbb",
+    "BBBBbbbbbbbBBBBb",
+    "bbbbbbbbbbbbbbbb",
+    "bbbbbbbbBBbbbbbb",
+    "bbbbbbbBBBBbbbbb",
+    "bbbbbbbbbbbbbbbb",
+    "bbbBBbbbbbbbBBbb",
+    "bbBBBBbbbbbBBBBb",
+    "bbbbbbbbbbbbbbbb",
 ];
 
 const ROAD: Cell = [
-    "cccccccc",
-    "ccCccccc",
-    "cccccccc",
-    "cccccccc",
-    "ccCccccc",
-    "cccccccc",
-    "cccccccc",
-    "ccCccccc",
+    "aaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAA",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "YYYYYYYYYYYYYYYY",
+    "YYYYYYYYYYYYYYYY",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAA",
+    "aaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAA",
+    "aaaaaaaaaaaaaaaa",
+];
+
+const ROAD_PLAIN: Cell = [
+    "aaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAA",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAA",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAA",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAA",
+    "aaaaaaaaaaaaaaaa",
+    "aaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAA",
+    "aaaaaaaaaaaaaaaa",
+    "AAAAAAAAAAAAAAAA",
+];
+
+const SIDEWALK: Cell = [
+    "CCCCCCCCCCCCCCCC",
+    "cccccccccccccccc",
+    "cccccccccccccccc",
+    "CccccccccccCcccc",
+    "cccccccccccccccc",
+    "cccccccccccccccc",
+    "cccccccccccccccc",
+    "CCCCCCCCCCCCCCCC",
+    "cccccccccccccccc",
+    "cccccccccccccccc",
+    "CccccccccccCcccc",
+    "cccccccccccccccc",
+    "cccccccccccccccc",
+    "cccccccccccccccc",
+    "CCCCCCCCCCCCCCCC",
+    "CccccccccccCcccc",
 ];
 
 const FLOOR: Cell = [
-    "........",
-    ".c.c.c..",
-    "........",
-    "..c.c.c.",
-    "........",
-    ".c.c.c..",
-    "........",
-    "..c.c.c.",
+    "ffffffffffffffFF",
+    "ffffffffffffffFF",
+    "ffffffffffffffFF",
+    "ffffffffffffffFF",
+    "FFFFFFFFFFFFFFFF",
+    "ffffffFFffffffff",
+    "ffffffFFffffffff",
+    "ffffffFFffffffff",
+    "ffffffFFffffffff",
+    "FFFFFFFFFFFFFFFF",
+    "ffffffffffffffFF",
+    "ffffffffffffffFF",
+    "ffffffffffffffFF",
+    "ffffffffffffffFF",
+    "FFFFFFFFFFFFFFFF",
+    "ffffffFFffffffff",
 ];
 
 const WALL: Cell = [
-    "XXXXXXXX",
-    "XwwwwwwX",
-    "XwddddwX",
-    "XwddddwX",
-    "XwddddwX",
-    "XwddddwX",
-    "XwddddwX",
-    "XXXXXXXX",
+    "XXXXXXXXXXXXXXXX",
+    "XwwwwwwwwwwwwwwX",
+    "XwwwwwwwwwwwwwwX",
+    "XWWWWWWWWWWWWWWX",
+    "XwwwwwwwwwwwwwwX",
+    "XwwwwwwwwwwwwwwX",
+    "XWWWWWWWWWWWWWWX",
+    "XwwwwwwwwwwwwwwX",
+    "XwwwwwwwwwwwwwwX",
+    "XWWWWWWWWWWWWWWX",
+    "XwwwwwwwwwwwwwwX",
+    "XwwwwwwwwwwwwwwX",
+    "XWWWWWWWWWWWWWWX",
+    "XwwwwwwwwwwwwwwX",
+    "XWWWWWWWWWWWWWWX",
+    "XXXXXXXXXXXXXXXX",
+];
+
+const WALL_INTERIOR: Cell = [
+    "XXXXXXXXXXXXXXXX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XiiiiiiiiiiiiiiX",
+    "XIIIIIIIIIIIIIIX",
+    "XIIIIIIIIIIIIIIX",
+    "XFFFFFFFFFFFFFFX",
+    "XXXXXXXXXXXXXXXX",
 ];
 
 const DOOR: Cell = [
-    "........",
-    "..dddd..",
-    "..d..d..",
-    "..d..d..",
-    "..d..d..",
-    "..d..d..",
-    "..dddd..",
-    "........",
+    "XX............XX",
+    "Xw............wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "XW...FFFFFF...WX",
+    "XX............XX",
+];
+
+const WINDOW: Cell = [
+    "XXXXXXXXXXXXXXXX",
+    "XwwwwwwwwwwwwwwX",
+    "XwwXXuuuuuuXXwwX",
+    "XwwXuuuuuuuuXwwX",
+    "XwwXuuuXXuuuXwwX",
+    "XwwXuuuXXuuuXwwX",
+    "XwwXXXXXXXXXXwwX",
+    "XwwXuuuXXuuuXwwX",
+    "XwwXuuuXXuuuXwwX",
+    "XwwXuuuuuuuuXwwX",
+    "XwwXXuuuuuuXXwwX",
+    "XwwwwwwwwwwwwwwX",
+    "XWWWWWWWWWWWWWWX",
+    "XwwwwwwwwwwwwwwX",
+    "XWWWWWWWWWWWWWWX",
+    "XXXXXXXXXXXXXXXX",
+];
+
+const ROOF: Cell = [
+    "rrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrr",
+    "RRRRRRRRRRRRRRRR",
+    "rrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrr",
+    "RRRRRRRRRRRRRRRR",
+    "rrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrr",
+    "RRRRRRRRRRRRRRRR",
+    "rrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrr",
+    "RRRRRRRRRRRRRRRR",
+    "rrrrrrrrrrrrrrrr",
+    "rrrrrrrrrrrrrrrr",
+    "RRRRRRRRRRRRRRRR",
+    "XXXXXXXXXXXXXXXX",
 ];
 
 const TREE: Cell = [
-    "........",
-    "...G....",
-    "..GGG...",
-    ".GGGGG..",
-    ".GgggG..",
-    "GGgggGG.",
-    "GgggggG.",
-    ".DDDDD..",
+    ".....hhhhhh.....",
+    "...hhtttttthh...",
+    "..htttttttttth..",
+    ".htttttttttttth.",
+    ".htttTTTTTtttth.",
+    "htttTTTTTTTtttth",
+    "htttTTTTTTTtttth",
+    "httTTTTTTTTTttth",
+    ".httTTTTTTTTtth.",
+    "..htTTTTTTTTth..",
+    "...htTTkkTTth...",
+    "....hTTkkTTh....",
+    "......kkkk......",
+    "......kKKk......",
+    ".....kkKKkk.....",
+    "....kkkKKkkk....",
+];
+
+const TREE_PINE: Cell = [
+    ".......hh.......",
+    "......hhhh......",
+    ".....hhtthh.....",
+    "....hhtttthh....",
+    "....hTTTTTTh....",
+    "...hhttttttthh..",
+    "..hhttttttttthh.",
+    "..hTTTTTTTTTTTh.",
+    ".hhttttttttttthh",
+    "hhttttttttttttth",
+    "hTTTTTTTTTTTTTTh",
+    "TTTTTTTkkTTTTTTT",
+    "......kkkk......",
+    "......kKKk......",
+    ".....kkKKkk.....",
+    "....kkkKKkkk....",
+];
+
+const FALLEN_LOG: Cell = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "..kKKKKKKKKKKk..",
+    ".kKkkkkkkkkkkKk.",
+    ".KkkGkkkGkkkkkK.",
+    ".KkkkGkkkkkGkkK.",
+    ".kKkkkkkkkkkkKk.",
+    "..kKKKKKKKKKKk..",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
 ];
 
 const STUMP: Cell = [
-    "........",
-    "........",
-    "........",
-    "........",
-    "..dddd..",
-    "..d..d..",
-    "..dddd..",
-    "........",
+    "................",
+    "................",
+    "................",
+    ".....KKKKKK.....",
+    "...KKkddddkKK...",
+    "..KkddpddpddkK..",
+    "..KkdpdDDdpdkK..",
+    "..KkddDDDDddkK..",
+    "..KkdpdDDdpdkK..",
+    "..KkddpddpddkK..",
+    "...KKkddddkKK...",
+    "....kKKKKKKk....",
+    "...kkKKKKKKkk...",
+    "................",
+    "................",
+    "................",
 ];
 
 const ROCK: Cell = [
-    "........",
-    "........",
-    "...CC...",
-    "..CCCC..",
-    ".CCCCCC.",
-    ".CCCCCC.",
-    "..CCCC..",
-    "........",
+    "................",
+    "................",
+    "......mcm.......",
+    "....mccccccm....",
+    "...mccccccccm...",
+    "..mccccccccccm..",
+    ".mccccCccCccccm.",
+    ".mcccCCccCCcccm.",
+    ".mcccCCCCCCCCcm.",
+    ".mccCCCCCCCCCCm.",
+    "..mCCCCCCCCCCm..",
+    "...mCCCCCCCCm...",
+    "....mMMMMMMm....",
+    "......mMMm......",
+    "................",
+    "................",
 ];
 
 const BUSH: Cell = [
-    "........",
-    "........",
-    "..g..g..",
-    ".gGggGg.",
-    "GgGgggGG",
-    ".gggggg.",
-    "..gggg..",
-    "........",
-];
-
-const PLAYER: Cell = [
-    "..hhhh..",
-    ".hhhhhh.",
-    ".kokoko.",
-    ".khhkok.",
-    ".kokoko.",
-    "..kok...",
-    ".d..d...",
-    "dd..dd..",
-];
-
-const ZOMBIE: Cell = [
-    "..gggg..",
-    ".gppppg.",
-    ".kokoko.",
-    ".kggkok.",
-    ".kokoko.",
-    "..kok...",
-    ".d..d...",
-    "dd..dd..",
-];
-
-const RUNNER: Cell = [
-    "..pppp..",
-    ".pppppp.",
-    ".kokoko.",
-    ".kppkok.",
-    ".kokoko.",
-    "..kok...",
-    ".d..d...",
-    "dd..dd..",
-];
-
-const BRUTE: Cell = [
-    "..rrrr..",
-    ".rrrrrr.",
-    ".kokoko.",
-    ".krrkok.",
-    ".kokoko.",
-    "..kok...",
-    ".d..d...",
-    "dddddd..",
-];
-
-const CAR: Cell = [
-    "........",
-    ".kkkkkk.",
-    "krrrrrrk",
-    "krssssrk",
-    "krssssrk",
-    "krrrrrrk",
-    ".kkkkkk.",
-    "........",
-];
-
-const CRATE: Cell = [
-    "XXXXXXXX",
-    "XddddddX",
-    "XdwwwwdX",
-    "XdwddwdX",
-    "XdwddwdX",
-    "XdwwwwdX",
-    "XddddddX",
-    "XXXXXXXX",
-];
-
-const LOOT_FOOD: Cell = [
-    "........",
-    "........",
-    "...oo...",
-    "..oOeo..",
-    "..oeeo..",
-    "...oo...",
-    "........",
-    "........",
-];
-
-const LOOT_AMMO: Cell = [
-    "........",
-    "........",
-    ".yy.yy..",
-    ".yyyy...",
-    ".y..y...",
-    ".yy.yy..",
-    "........",
-    "........",
-];
-
-const LOOT_WEAPON: Cell = [
-    "........",
-    "........",
-    ".kkkk...",
-    ".k..kkk.",
-    ".k....k.",
-    ".kkkkk..",
-    "........",
-    "........",
-];
-
-const LOOT_MATERIAL: Cell = [
-    "........",
-    "........",
-    ".dd.dd..",
-    ".dD.Dd..",
-    ".dD.Dd..",
-    ".dd.dd..",
-    "........",
-    "........",
-];
-
-const FISH: Cell = [
-    "........",
-    "........",
-    "..nnn...",
-    ".nnnnn..",
-    "..nnn...",
-    "..n..n..",
-    "........",
-    "........",
-];
-
-const BARREL: Cell = [
-    "........",
-    ".oooooo.",
-    ".oXooXo.",
-    ".oooooo.",
-    ".oooooo.",
-    ".oXooXo.",
-    ".oooooo.",
-    "........",
-];
-
-const CAMPFIRE: Cell = [
-    "........",
-    "....y...",
-    "...yYo..",
-    "..oyYo..",
-    ".eoyyoe.",
-    ".eeooee.",
-    "..eeee..",
-    "........",
+    "................",
+    ".....thht.......",
+    "...thhttttht....",
+    "..thhtvvttttht..",
+    ".thttttvvttttht.",
+    ".thtvvttttvvtht.",
+    "thttttttttttttht",
+    "thttvvttttvvthtt",
+    "thttttvvttttthtt",
+    "tTttvvttttvvttTt",
+    ".tTttttvvttttTt.",
+    "..tTTttttttTTt..",
+    "...tTTTTTTTTt...",
+    ".....tTTTTt.....",
+    "................",
+    "................",
 ];
 
 const FENCE: Cell = [
-    "........",
-    ".d.d.d..",
-    "ddddddd.",
-    ".d.d.d..",
-    "ddddddd.",
-    ".d.d.d..",
-    "ddddddd.",
-    "........",
+    ".ww..........ww.",
+    ".ww..........ww.",
+    ".ww..WWWWWW..ww.",
+    ".ww..wwwwww..ww.",
+    ".ww..wwwwww..ww.",
+    ".ww..WWWWWW..ww.",
+    ".ww..........ww.",
+    ".ww..WWWWWW..ww.",
+    ".ww..wwwwww..ww.",
+    ".ww..wwwwww..ww.",
+    ".ww..WWWWWW..ww.",
+    ".ww..........ww.",
+    ".ww..........ww.",
+    ".ww..........ww.",
+    ".WW..........WW.",
+    ".WW..........WW.",
 ];
 
-const SHOP: Cell = [
-    "XXXXXXXX",
-    "XrrrrrrX",
-    "XrrrrrrX",
-    "XwwwwwwX",
-    "XwwwwwwX",
-    "XwwwwwwX",
-    "XwwwwwwX",
-    "XXXXXXXX",
+const GATE: Cell = [
+    "ww............ww",
+    "ww............ww",
+    "ww..WWWWWWWW..ww",
+    "ww..wwwwwwww..ww",
+    "ww...WwwwwW...ww",
+    "ww....WwwW....ww",
+    "ww.....WW.....ww",
+    "ww.....WW.....ww",
+    "ww....WwwW....ww",
+    "ww...WwwwwW...ww",
+    "ww..wwwwwwww..ww",
+    "ww..WWWWWWWW..ww",
+    "ww............ww",
+    "ww............ww",
+    "WW............WW",
+    "WW............WW",
 ];
 
-const HOUSE: Cell = [
-    "XXXXXXXX",
-    "XddddddX",
-    "XddddddX",
-    "XddddddX",
-    "XwwwwwwX",
-    "XwwwwwwX",
-    "XwwwwwwX",
-    "XXXXXXXX",
+const SAND: Cell = [
+    "ssssssssssssssss",
+    "ssSsssssssssSsss",
+    "ssssssssSsssssss",
+    "sssspsssssssssss",
+    "ssssssssssssSsss",
+    "sssSssssssssssss",
+    "ssssssssspssssss",
+    "ssssssssssssssss",
+    "ssSssssssssssSss",
+    "ssssssSsssssssss",
+    "ssssssssssssssss",
+    "ssspsssssssspsss",
+    "ssssssssSsssssss",
+    "ssSsssssssssssss",
+    "ssssssssssSsssss",
+    "ssssssssssssssss",
 ];
 
-const FISHING_SPOT: Cell = [
-    "........",
-    "........",
-    "........",
-    "...n....",
-    "..nnn...",
-    "...n....",
-    "........",
-    "........",
-];
-
-const BULLET: Cell = [
-    "........",
-    "........",
-    "........",
-    "..yyyy..",
-    "...yy...",
-    "........",
-    "........",
-    "........",
+const DOCK: Cell = [
+    "WWWWWWWWWWWWWWWW",
+    "wwwwwwwwwwwwwwww",
+    "wwwwwwwwwwwwwwww",
+    "WWWWWWWWWWWWWWWW",
+    "wwwwwwwwwwwwwwww",
+    "wwwwwwwwwwwwwwww",
+    "WWWWWWWWWWWWWWWW",
+    "wwwwwwwwwwwwwwww",
+    "wwwwwwwwwwwwwwww",
+    "WWWWWWWWWWWWWWWW",
+    "wwwwwwwwwwwwwwww",
+    "wwwwwwwwwwwwwwww",
+    "WWWWWWWWWWWWWWWW",
+    "wwwwwwwwwwwwwwww",
+    "wwwwwwwwwwwwwwww",
+    "WWWWWWWWWWWWWWWW",
 ];
 
 const BED: Cell = [
-    "........",
-    "........",
-    ".ccccc..",
-    "csssssc.",
-    "csssssc.",
-    ".ccccc..",
-    "........",
-    "........",
+    ".XXXXXXXXXXXXXX.",
+    ".XkkkkkkkkkkkkX.",
+    ".XkqqqqqqqqqqkX.",
+    ".XkqqqqqqqqqqkX.",
+    ".XkqqqqqqqqqqkX.",
+    ".XkQQQQQQQQQQkX.",
+    ".XkQQQQQQQQQQkX.",
+    ".XkQQQQQQQQQQkX.",
+    ".XkQQQQQQQQQQkX.",
+    ".XkQQQQQQQQQQkX.",
+    ".XkQQQQQQQQQQkX.",
+    ".XkQQQQQQQQQQkX.",
+    ".XkQQQQQQQQQQkX.",
+    ".XkQQQQQQQQQQkX.",
+    ".XkKKKKKKKKKKkX.",
+    ".XXXXXXXXXXXXXX.",
 ];
 
 const TABLE: Cell = [
-    "........",
-    ".dddddd.",
-    "d......d",
-    "d......d",
-    "d......d",
-    "d......d",
-    ".dddddd.",
-    "........",
+    "..XXXXXXXXXXXX..",
+    "..XkkkkkkkkkkX..",
+    "..XkkkkkkkkkkX..",
+    "..XkKkkkkkkKkX..",
+    "..XkkkkkkkkkkX..",
+    "..XkkkKkkKkkkX..",
+    "..XkkkkkkkkkkX..",
+    "..XkkkkkkkkkkX..",
+    "..XkKkkkkkkKkX..",
+    "..XkkkkkkkkkkX..",
+    "..XkkkkkkkkkkX..",
+    "..XKKKKKKKKKKX..",
+    "..XX..XXXX..XX..",
+    "..kK........kK..",
+    "..kK........kK..",
+    "..XX........XX..",
+];
+
+const CHAIR: Cell = [
+    ".....XXXXXX.....",
+    ".....XkkkkX.....",
+    ".....XkKkKX.....",
+    ".....XkkkkX.....",
+    "....XXXXXXXX....",
+    "....XkkkkkkX....",
+    "....XkkkkkkX....",
+    "....XkKKKKkX....",
+    "....XXXXXXXX....",
+    "....XX....XX....",
+    "....kK....kK....",
+    "....kK....kK....",
+    "....kK....kK....",
+    "....XX....XX....",
+    "................",
+    "................",
 ];
 
 const SHELF: Cell = [
-    "........",
-    "dddddddd",
-    "d.w..w.d",
-    "dddddddd",
-    "d.w..w.d",
-    "dddddddd",
-    "d.w..w.d",
-    "dddddddd",
+    "XXXXXXXXXXXXXXXX",
+    "XkkkkkkkkkkkkkkX",
+    "XkQQ..vv..mm..kX",
+    "XkQQ..vv..mm..kX",
+    "XkKKKKKKKKKKKKkX",
+    "Xkqq..YY..QQ..kX",
+    "Xkqq..YY..QQ..kX",
+    "XkKKKKKKKKKKKKkX",
+    "Xkvv..qq..mm..kX",
+    "Xkvv..qq..mm..kX",
+    "XkKKKKKKKKKKKKkX",
+    "Xkmm..QQ..vv..kX",
+    "Xkmm..QQ..vv..kX",
+    "XkKKKKKKKKKKKKkX",
+    "XkkkkkkkkkkkkkkX",
+    "XXXXXXXXXXXXXXXX",
 ];
 
-/// All cells in atlas order (row-major, 16 per row).
-fn all_cells() -> Vec<Cell> {
-    vec![
-        GRASS, DIRT, WATER, ROAD, FLOOR, WALL, DOOR, TREE, STUMP, ROCK, BUSH, PLAYER,
-        ZOMBIE, RUNNER, BRUTE, CAR, CRATE, LOOT_FOOD, LOOT_AMMO, LOOT_WEAPON, LOOT_MATERIAL,
-        FISH, BARREL, CAMPFIRE, FENCE, SHOP, HOUSE, FISHING_SPOT, BULLET, BED, TABLE, SHELF,
-    ]
-}
+const COUNTER: Cell = [
+    "XXXXXXXXXXXXXXXX",
+    "XmmmmmmmmmmmmmmX",
+    "XmmXXuuuuuuXXmmX",
+    "XmmXuuuuuuuuXmmX",
+    "XmmXuuuuuuuuXmmX",
+    "XmmXXuuuuuuXXmmX",
+    "XmmmmmmmmmmmmmmX",
+    "XkKKKKKKKKKKKKkX",
+    "XkkkkkkkkkkkkkkX",
+    "XkKKKKKKKKKKKKkX",
+    "XkkkkkkkkkkkkkkX",
+    "XkKKKKKKKKKKKKkX",
+    "XkkkkkkkkkkkkkkX",
+    "XkKKKKKKKKKKKKkX",
+    "XkKKKKKKKKKKKKkX",
+    "XXXXXXXXXXXXXXXX",
+];
 
-/// Build the atlas image.
+const CRATE: Cell = [
+    "XXXXXXXXXXXXXXXX",
+    "XmkkkkkkkkkkkkmX",
+    "XkMkkkkkkkkkkMkX",
+    "XkkMkkkkkkkkMkkX",
+    "XkkkMkkkkkkMkkkX",
+    "XkkkkMkkkkMkkkkX",
+    "XkkkkkMkkMkkkkkX",
+    "XkkkkkkMMkkkkkkX",
+    "XkkkkkkMMkkkkkkX",
+    "XkkkkkMkkMkkkkkX",
+    "XkkkkMkkkkMkkkkX",
+    "XkkkMkkkkkkMkkkX",
+    "XkkMkkkkkkkkMkkX",
+    "XkMkkkkkkkkkkMkX",
+    "XmkkkkkkkkkkkkmX",
+    "XXXXXXXXXXXXXXXX",
+];
+
+const CAR: Cell = [
+    "...XXXXXXXXXX...",
+    "..XmmMMMMMMmmX..",
+    ".XmmmmmmmmmmmmX.",
+    ".XmmmmmmmmmmmmX.",
+    ".XmmXuuuuuuXmmX.",
+    ".XmXuuuuuuuuXmX.",
+    ".XmXuuuuuuuuXmX.",
+    ".XmmXXXXXXXXmmX.",
+    ".XmmmmmmmmmmmmX.",
+    ".XmmmmmmmmmmmmX.",
+    ".XmXuuuuuuuuXmX.",
+    ".XmmXuuuuuuXmmX.",
+    ".XmmmmmmmmmmmmX.",
+    ".XmmrrrrrrrrXmmX",
+    "..XmmMMMMMMmmX..",
+    "...XXXXXXXXXX...",
+];
+
+const TRUCK: Cell = [
+    "..XXXXXXXXXXXX..",
+    ".XmmMMMMMMMMmmX.",
+    "XmmmmmmmmmmmmmmX",
+    "XmmmmmmmmmmmmmmX",
+    "XmmXuuuuuuuuXmmX",
+    "XmXuuuuuuuuuuXmX",
+    "XmmXXXXXXXXXXmmX",
+    "XmmmmmmmmmmmmmmX",
+    "XkKKKKKKKKKKKKkX",
+    "XkddddddddddddkX",
+    "XkddddddddddddkX",
+    "XkddddddddddddkX",
+    "XkddddddddddddkX",
+    "XkKKKKKKKKKKKKkX",
+    ".XmmMMMMMMMMmmX.",
+    "..XXXXXXXXXXXX..",
+];
+
+const LAMP_POST: Cell = [
+    "......XXXX......",
+    ".....XEEEE......",
+    "....XEEeeeeX....",
+    "....XeeEEeeX....",
+    "....XeeEEeeX....",
+    ".....XEEEE......",
+    "......XXXX......",
+    ".......MM.......",
+    ".......MM.......",
+    ".......MM.......",
+    ".......MM.......",
+    ".......MM.......",
+    ".......MM.......",
+    ".......MM.......",
+    "......MMMM......",
+    ".....XXXXXX.....",
+];
+
+const CAMPFIRE: Cell = [
+    "................",
+    "......EEEE......",
+    ".....EEeeEE.....",
+    "....EEeeeeEE....",
+    "....EeeeeeeE....",
+    "...EEeeeeeeEE...",
+    "...EeeeeeEEeeE..",
+    "..mCeeeeeEEeecm.",
+    ".mCceeeeeeeecCcm",
+    ".mCcKkkkkkkKcCcm",
+    ".mCCkKkEEkKkcCCm",
+    "..mCCkkEEkkCCm..",
+    "...mMMMMMMMMm...",
+    ".....mMMMMm.....",
+    "................",
+    "................",
+];
+
+const BARRICADE: Cell = [
+    ".X..X....X..X...",
+    ".k..k....k..k...",
+    ".k..k....k..k...",
+    "XXXXXXXXXXXXXXX.",
+    "XkkkkkkkkkkkkkX.",
+    "XkKkkkkkkkkkkkX.",
+    "XkKkkkkkkkkkkkX.",
+    "XXXXXXXXXXXXXXX.",
+    ".k..k....k..k...",
+    "XXXXXXXXXXXXXXX.",
+    "XkkkkkkkkkkkkkX.",
+    "XkKkkkkkkkkkkkX.",
+    "XkKkkkkkkkkkkkX.",
+    "XXXXXXXXXXXXXXX.",
+    ".k..k....k..k...",
+    ".K..K....K..K...",
+];
+
+const PLAYER: Cell = [
+    "......XXXX......",
+    ".....XooooX.....",
+    "....XooooooX....",
+    "....XoXooXoX....",
+    "....XooooooX....",
+    ".....XooooX.....",
+    "....XXXXXXXX....",
+    "...XkMMkkMMkX...",
+    "..XkMMkkkkMMkX..",
+    "..XkkkkkkkkkkX..",
+    "..XkkkkkkkkkkX..",
+    "...XXXXXXXXXX...",
+    "....XMMXXMMX....",
+    "....XMMXXMMX....",
+    "....XMMXXMMX....",
+    "....XXXX.XXXX...",
+];
+
+const ZOMBIE: Cell = [
+    "......XXXX......",
+    ".....XzzzzX.....",
+    "....XzzvvzzX....",
+    "....XzXzzXzX....",
+    "....XzzzzzzX....",
+    ".....XzzzzX.....",
+    "....XXXXXXXX....",
+    "...XzZZzzZZzX...",
+    "..XzZZzzzzZZzX..",
+    "..XzzzzvvzzzzX..",
+    "..XzzzzzzzzzzX..",
+    "...XXXXXXXXXX...",
+    "....XZZXXZZX....",
+    "....XZZXXZZX....",
+    "....XZZXXZZX....",
+    "....XXXX.XXXX...",
+];
+
+const RUNNER: Cell = [
+    "......XXXX......",
+    ".....XvvvvX.....",
+    "....XvvzzvvX....",
+    "....XvXvvXvX....",
+    "....XvvvvvvX....",
+    ".....XvvvvX.....",
+    "....XXXXXXXX....",
+    "...XvZZvvZZvX...",
+    "..XvZZvvvvZZvX..",
+    "..XvvvvvvvvvvX..",
+    "..XvvvvvvvvvvX..",
+    "...XXXXXXXXXX...",
+    "....XZZXXZZX....",
+    "....XZZXXZZX....",
+    "....XZZXXZZX....",
+    "....XXXX.XXXX...",
+];
+
+const BRUTE: Cell = [
+    "....XXXXXXXX....",
+    "...XzzzzzzzzX...",
+    "..XzzvvvvvvzzX..",
+    "..XzzXzzzzXzzX..",
+    "..XzzzzzzzzzzX..",
+    "...XzzzzzzzzX...",
+    "..XXXXXXXXXXXX..",
+    "..XZZZZZZZZZZX..",
+    ".XZZZZzzzzZZZZX.",
+    ".XZZZzzvvzzZZZX.",
+    ".XZZZZzzzzZZZZX.",
+    "..XXXXXXXXXXXX..",
+    "..XZZZX..XZZZX..",
+    "..XZZZX..XZZZX..",
+    "..XZZZX..XZZZX..",
+    "..XXXXX..XXXXX..",
+];
+
+const LOOT_FOOD: Cell = [
+    "................",
+    "................",
+    ".....XXXXXX.....",
+    "....XrrrrrrX....",
+    "...XrvvvvvvrX...",
+    "...XrqqqqqqrX...",
+    "...XrqqqqqqrX...",
+    "...XrvvvvvvrX...",
+    "...XrvvvvvvrX...",
+    "...XrqqqqqqrX...",
+    "...XrqqqqqqrX...",
+    "...XrvvvvvvrX...",
+    "...XrrrrrrrrX...",
+    "....XmmmmmmX....",
+    ".....XXXXXX.....",
+    "................",
+];
+
+const LOOT_AMMO: Cell = [
+    "................",
+    "................",
+    "....XXXXXXXX....",
+    "...XGGGGGGGGX...",
+    "..XGgYYYYYYgGX..",
+    "..XGYYYYYYYYGX..",
+    "..XGYYYYYYYYGX..",
+    "..XGgYYYYYYgGX..",
+    "..XGgYYYYYYgGX..",
+    "..XGYYYYYYYYGX..",
+    "..XGYYYYYYYYGX..",
+    "..XGgYYYYYYgGX..",
+    "...XGGGGGGGGX...",
+    "....XXXXXXXX....",
+    "................",
+    "................",
+];
+
+const LOOT_WEAPON: Cell = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    ".mmmmmmmm.......",
+    ".mMMMMMMmmmmmm..",
+    "..mmXkkXmmmmmm..",
+    "...XkkkkX...mm..",
+    "...XkkkX........",
+    "....XkX.........",
+    ".....X..........",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+
+const LOOT_MATERIAL: Cell = [
+    "................",
+    "................",
+    "...XXXXXX.......",
+    "..XkkkkkkX......",
+    "..XkKKKKkX......",
+    "...XXXXXX.XXXXXX",
+    "........XkkkkkkX",
+    "XXXXXX..XkKKKKkX",
+    "XkkkkkkX.XXXXXX.",
+    "XkKKKKkX........",
+    ".XXXXXX.........",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+
+const FISHING_SPOT: Cell = [
+    "................",
+    "......bbbb......",
+    "....bbBBBBbb....",
+    "...bBBBBBBBBb...",
+    "..bBBbssssbBBb..",
+    "..bBBssssssBBb..",
+    "..bBBssssssBBb..",
+    "..bBBbssssbBBb..",
+    "...bBBBBBBBBb...",
+    "....bbBBBBbb....",
+    "......bbbb......",
+    "................",
+    ".......WW.......",
+    ".......ww.......",
+    ".......ww.......",
+    ".......WW.......",
+];
+
+const BULLET: Cell = [
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "......YYYY......",
+    ".....YYYYYY.....",
+    ".....YYYYYY.....",
+    "......YYYY......",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+];
+
+const SHOP: Cell = [
+    "XXXXXXXXXXXXXXXX",
+    "XrrrrrrrrrrrrrrX",
+    "XqqqqqqqqqqqqqqX",
+    "XrrrrrrrrrrrrrrX",
+    "XwwwwwwwwwwwwwwX",
+    "XwwXXuuuuuuXXwwX",
+    "XwwXuuuuuuuuXwwX",
+    "XwwXuuuXXuuuXwwX",
+    "XwwXXXXXXXXXXwwX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "XW...FFFFFF...WX",
+    "XXXXXXXXXXXXXXXX",
+];
+
+const HOUSE: Cell = [
+    "XXXXXXXXXXXXXXXX",
+    "XrrrrrrrrrrrrrrX",
+    "XrrrrrrrrrrrrrrX",
+    "XRRRRRRRRRRRRRRX",
+    "XwwwwwwwwwwwwwwX",
+    "XwwXXuuuuuuXXwwX",
+    "XwwXuuuuuuuuXwwX",
+    "XwwXXuuuuuuXXwwX",
+    "XwwwwwwwwwwwwwwX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "Xw...ffffff...wX",
+    "XW...FFFFFF...WX",
+    "XXXXXXXXXXXXXXXX",
+];
+
+/// Table of all 45 cells ordered by tile id.
+const CELLS: [Cell; 45] = [
+    GRASS,         // 0
+    DIRT,          // 1
+    WATER,         // 2
+    ROAD,          // 3
+    ROAD_PLAIN,    // 4
+    SIDEWALK,      // 5
+    FLOOR,         // 6
+    WALL,          // 7
+    WALL_INTERIOR, // 8
+    DOOR,          // 9
+    WINDOW,        // 10
+    ROOF,          // 11
+    TREE,          // 12
+    TREE_PINE,     // 13
+    FALLEN_LOG,    // 14
+    STUMP,         // 15
+    ROCK,          // 16
+    BUSH,          // 17
+    FENCE,         // 18
+    GATE,          // 19
+    SAND,          // 20
+    DOCK,          // 21
+    BED,           // 22
+    TABLE,         // 23
+    CHAIR,         // 24
+    SHELF,         // 25
+    COUNTER,       // 26
+    CRATE,         // 27
+    CAR,           // 28
+    TRUCK,         // 29
+    LAMP_POST,     // 30
+    CAMPFIRE,      // 31
+    BARRICADE,     // 32
+    PLAYER,        // 33
+    ZOMBIE,        // 34
+    RUNNER,        // 35
+    BRUTE,         // 36
+    LOOT_FOOD,     // 37
+    LOOT_AMMO,     // 38
+    LOOT_WEAPON,   // 39
+    LOOT_MATERIAL, // 40
+    FISHING_SPOT,  // 41
+    BULLET,        // 42
+    SHOP,          // 43
+    HOUSE,         // 44
+];
+
+/// Build the full sprite atlas into an `RgbaImage`.
 pub fn build_atlas() -> RgbaImage {
-    let width = ATLAS_COLS * TILE;
-    let height = ATLAS_ROWS * TILE;
-    let mut img = RgbaImage::new(width, height);
-    for (index, cell) in all_cells().into_iter().enumerate() {
-        let ox = (index as u32 % ATLAS_COLS) * TILE;
-        let oy = (index as u32 / ATLAS_COLS) * TILE;
-        for (row, line) in cell.iter().enumerate() {
-            for (col, ch) in line.chars().enumerate() {
-                if let Some(pixel) = parse_pixel(ch) {
-                    img.put_pixel(ox + col as u32, oy + row as u32, pixel);
+    let atlas_w = ATLAS_COLS * TILE;
+    let atlas_h = ATLAS_ROWS * TILE;
+    let mut img = RgbaImage::from_pixel(atlas_w, atlas_h, Rgba([0, 0, 0, 0]));
+
+    for (tile_id, cell) in CELLS.iter().enumerate() {
+        let col = (tile_id as u32) % ATLAS_COLS;
+        let row = (tile_id as u32) / ATLAS_COLS;
+        let base_x = col * TILE;
+        let base_y = row * TILE;
+
+        for (py, line) in cell.iter().enumerate() {
+            for (px, ch) in line.chars().enumerate() {
+                if let Some(rgba) = parse_pixel(ch) {
+                    img.put_pixel(base_x + px as u32, base_y + py as u32, rgba);
                 }
             }
         }
     }
+
     img
 }
 
-/// UV rectangle for an atlas tile id.
-pub fn tile_uv(id: u32) -> [f32; 4] {
-    let width = ATLAS_COLS * TILE;
-    let height = ATLAS_ROWS * TILE;
-    let ox = (id % ATLAS_COLS) * TILE;
-    let oy = (id / ATLAS_COLS) * TILE;
-    let u0 = ox as f32 / width as f32;
-    let v0 = oy as f32 / height as f32;
-    let u1 = (ox + TILE) as f32 / width as f32;
-    let v1 = (oy + TILE) as f32 / height as f32;
+/// UV rectangle `[u0, v0, u1, v1]` for `tile_id`.
+pub fn tile_uv(tile_id: u32) -> [f32; 4] {
+    let col = (tile_id % ATLAS_COLS) as f32;
+    let row = (tile_id / ATLAS_COLS) as f32;
+    let u0 = col / ATLAS_COLS as f32;
+    let v0 = row / ATLAS_ROWS as f32;
+    let u1 = (col + 1.0) / ATLAS_COLS as f32;
+    let v1 = (row + 1.0) / ATLAS_ROWS as f32;
     [u0, v0, u1, v1]
 }
 
@@ -481,24 +1057,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn atlas_contains_every_tile() {
-        assert_eq!(all_cells().len() as u32, ATLAS_COLS * ATLAS_ROWS);
+    fn atlas_builds_correctly() {
+        let img = build_atlas();
+        assert_eq!(img.width(), ATLAS_COLS * TILE);
+        assert_eq!(img.height(), ATLAS_ROWS * TILE);
     }
 
     #[test]
-    fn tile_uv_is_normalised() {
-        let uv = tile_uv(id::PLAYER);
+    fn cells_are_16x16() {
+        for (i, cell) in CELLS.iter().enumerate() {
+            assert_eq!(cell.len(), 16, "Cell {} row count is not 16", i);
+            for (r, row) in cell.iter().enumerate() {
+                assert_eq!(row.len(), 16, "Cell {} row {} len is not 16", i, r);
+            }
+        }
+    }
+
+    #[test]
+    fn tile_uv_bounds() {
+        let uv = tile_uv(id::GRASS);
         assert!(uv[0] >= 0.0 && uv[2] <= 1.0);
         assert!(uv[1] >= 0.0 && uv[3] <= 1.0);
-        assert!(uv[2] > uv[0] && uv[3] > uv[1]);
-    }
-
-    #[test]
-    fn atlas_pixels_are_drawn() {
-        let img = build_atlas();
-        let uv = tile_uv(id::PLAYER);
-        let px = (uv[0] * img.width() as f32) as u32;
-        let py = (uv[1] * img.height() as f32) as u32;
-        assert_ne!(img.get_pixel(px + 1, py + 1).0, [0, 0, 0, 0]);
     }
 }

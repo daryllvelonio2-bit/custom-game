@@ -17,7 +17,7 @@ pub mod world;
 
 use art::id;
 use entity::{rects_overlap, Entity, Kind, ZombieKind};
-use world::{Biome, LootKind, Rng, World, CHUNK_SIZE};
+use world::{LootKind, Rng, World};
 
 const MAX_HP: i32 = 100;
 const MAX_STAMINA: f32 = 100.0;
@@ -198,6 +198,11 @@ impl Game {
         let px = self.player_x;
         let py = self.player_y;
         for chunk in self.world.chunks() {
+            for b in &chunk.buildings {
+                if b.contains(px, py) {
+                    return true;
+                }
+            }
             for prop in &chunk.props {
                 if let Some((bx, by, bw, bh)) = prop.interior {
                     if px >= bx && px <= bx + bw && py >= by && py <= by + bh {
@@ -244,10 +249,9 @@ impl Game {
                                     spawns.push(Entity::loot(item.x, item.y, item.kind));
                                 }
                             }
-                        }
-                        if chunk.biome == Biome::Town {
-                            let (ox, oy) = World::chunk_origin(key.0, key.1);
-                            spawns.push(Entity::car(ox + CHUNK_SIZE * 0.5, oy + CHUNK_SIZE * 0.5, 0.0));
+                            if prop.tile == id::CAR || prop.tile == id::TRUCK {
+                                spawns.push(Entity::car(prop.x, prop.y, 0.0));
+                            }
                         }
                     }
                 }
@@ -261,10 +265,26 @@ impl Game {
         for dy in -1..=1 {
             for dx in -1..=1 {
                 if let Some(chunk) = self.world.chunk(pcx + dx, pcy + dy) {
+                    let (ox, oy) = World::chunk_origin(pcx + dx, pcy + dy);
+                    let local_x = x - ox;
+                    let local_y = y - oy;
+                    if local_x >= 0.0 && local_x < world::CHUNK_SIZE && local_y >= 0.0 && local_y < world::CHUNK_SIZE {
+                        let tx = local_x as usize;
+                        let ty = local_y as usize;
+                        if chunk.get_tile(tx, ty) == id::WATER as u8 {
+                            return true;
+                        }
+                    }
+
                     for prop in &chunk.props {
                         if prop.solid {
-                            let pw = if prop.tile == id::WALL || prop.tile == id::DOOR { 1.0 } else { 1.2 };
-                            let ph = if prop.tile == id::WALL || prop.tile == id::DOOR { 1.0 } else { 1.2 };
+                            let (pw, ph) = if prop.tile == id::WALL || prop.tile == id::WALL_INTERIOR || prop.tile == id::WINDOW {
+                                (1.0, 1.0)
+                            } else if prop.tree {
+                                (0.8, 0.8)
+                            } else {
+                                (prop.size * 0.8, prop.size * 0.8)
+                            };
                             if rects_overlap(
                                 x - radius,
                                 y - radius,
@@ -953,7 +973,7 @@ impl Game {
             for dx in -1..=1 {
                 if let Some(chunk) = self.world.chunk(pcx + dx, pcy + dy) {
                     for prop in &chunk.props {
-                        if prop.solid && (prop.tile == id::WALL || prop.tile == id::FENCE) {
+                        if prop.solid && (prop.tile == id::WALL || prop.tile == id::WALL_INTERIOR || prop.tile == id::WINDOW || prop.tile == id::FENCE) {
                             walls.push(WallBox {
                                 x0: prop.x - 0.5,
                                 y0: prop.y - 0.5,
@@ -1067,10 +1087,10 @@ impl Game {
             for dx in -1..=1 {
                 if let Some(chunk) = self.world.chunk(pcx + dx, pcy + dy) {
                     for prop in &chunk.props {
-                        if prop.tile == id::WALL || prop.tile == id::DOOR {
+                        if prop.tile == id::WALL || prop.tile == id::WALL_INTERIOR || prop.tile == id::WINDOW || prop.tile == id::DOOR || prop.tile == id::CAR || prop.tile == id::TRUCK {
                             continue;
                         }
-                        let size = if prop.tile == id::CAR { 2.2 } else { 1.2 };
+                        let size = prop.size;
                         if let Some((fwd, sx, sy, w, h)) = project(prop.x, prop.y, size) {
                             let fog = (1.0 - (fwd / max_dist).clamp(0.0, 1.0)) * (1.0 - night * 0.5);
                             billboards.push(Billboard {
@@ -1214,10 +1234,21 @@ impl Game {
         let night = self.night_factor();
         let tex = self.atlas_texture;
 
+        let view_h = 22.0f32;
+        let (screen_w, screen_h) = ctx.renderer.size();
+        let sw = screen_w as f32;
+        let sh = screen_h as f32;
+        let aspect = sw / sh.max(1.0);
+        let view_w = view_h * aspect;
+        let cam_min_x = self.player_x - view_w * 0.5 - 1.0;
+        let cam_max_x = self.player_x + view_w * 0.5 + 1.0;
+        let cam_min_y = self.player_y - view_h * 0.5 - 1.0;
+        let cam_max_y = self.player_y + view_h * 0.5 + 1.0;
+
         ctx.renderer.set_camera(Camera {
             x: self.player_x,
             y: self.player_y,
-            view_height: 18.0,
+            view_height: view_h,
         });
 
         let bg_r = 0.08 * (1.0 - night * 0.7);
@@ -1231,33 +1262,78 @@ impl Game {
         });
 
         let (pcx, pcy) = World::chunk_of(self.player_x, self.player_y);
+        let ground_tint = [1.0 - night * 0.45, 1.0 - night * 0.45, 1.0 - night * 0.35, 1.0];
+
+        // 1. Tiled Ground Grid (Asphalt streets, lane dividers, sidewalks, parquet floors, grass)
         for dy in -1..=1 {
             for dx in -1..=1 {
                 let cx = pcx + dx;
                 let cy = pcy + dy;
                 if let Some(chunk) = self.world.chunk(cx, cy) {
                     let (ox, oy) = World::chunk_origin(cx, cy);
-                    let g_uv = art::tile_uv(match chunk.biome {
-                        Biome::Town => id::ROAD,
-                        Biome::Forest => id::DIRT,
-                        Biome::Lake => id::WATER,
-                        Biome::Field => id::GRASS,
-                    });
-                    let ground_tint = [1.0 - night * 0.45, 1.0 - night * 0.45, 1.0 - night * 0.35, 1.0];
-                    ctx.renderer.add_sprite(
-                        tex,
-                        g_uv,
-                        ox + CHUNK_SIZE * 0.5,
-                        oy + CHUNK_SIZE * 0.5,
-                        CHUNK_SIZE,
-                        CHUNK_SIZE,
-                        ground_tint,
-                    );
+                    let min_tx = ((cam_min_x - ox).floor() as i32).clamp(0, world::CHUNK_TILES as i32) as usize;
+                    let max_tx = ((cam_max_x - ox).ceil() as i32).clamp(0, world::CHUNK_TILES as i32) as usize;
+                    let min_ty = ((cam_min_y - oy).floor() as i32).clamp(0, world::CHUNK_TILES as i32) as usize;
+                    let max_ty = ((cam_max_y - oy).ceil() as i32).clamp(0, world::CHUNK_TILES as i32) as usize;
 
+                    for ty in min_ty..max_ty {
+                        for tx in min_tx..max_tx {
+                            let tile = chunk.get_tile(tx, ty);
+                            let g_uv = art::tile_uv(tile as u32);
+                            let wx = ox + tx as f32 + 0.5;
+                            let wy = oy + ty as f32 + 0.5;
+                            ctx.renderer.add_sprite(tex, g_uv, wx, wy, 1.0, 1.0, ground_tint);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. Building Roofs (Rendered over buildings when player is outside)
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let cx = pcx + dx;
+                let cy = pcy + dy;
+                if let Some(chunk) = self.world.chunk(cx, cy) {
+                    for b in &chunk.buildings {
+                        if b.contains(self.player_x, self.player_y) {
+                            continue;
+                        }
+                        let r_uv = art::tile_uv(b.roof_tile);
+                        ctx.renderer.add_sprite(
+                            tex,
+                            r_uv,
+                            b.x + b.width * 0.5,
+                            b.y + b.height * 0.5,
+                            b.width,
+                            b.height,
+                            [1.0 - night * 0.4, 1.0 - night * 0.4, 1.0 - night * 0.35, 1.0],
+                        );
+                    }
+                }
+            }
+        }
+
+        // 3. World Props (Fences, gates, street lamps, trees, fallen logs, rocks, furniture)
+        for dy in -1..=1 {
+            for dx in -1..=1 {
+                let cx = pcx + dx;
+                let cy = pcy + dy;
+                if let Some(chunk) = self.world.chunk(cx, cy) {
                     for prop in &chunk.props {
+                        if prop.tile == id::CAR || prop.tile == id::TRUCK {
+                            continue; // Interactive vehicles rendered by entity system
+                        }
+                        let covered_by_roof = chunk.buildings.iter().any(|b| {
+                            !b.contains(self.player_x, self.player_y) && b.contains(prop.x, prop.y)
+                        });
+                        if covered_by_roof && prop.tile != id::WALL && prop.tile != id::WINDOW && prop.tile != id::DOOR {
+                            continue;
+                        }
+
                         let prop_uv = art::tile_uv(prop.tile);
-                        let pw = if prop.tile == id::WALL || prop.tile == id::DOOR { 1.0 } else { 1.3 };
-                        let ph = if prop.tile == id::WALL || prop.tile == id::DOOR { 1.0 } else { 1.3 };
+                        let pw = prop.size;
+                        let ph = prop.size;
                         let tint = if prop.solid {
                             [1.0 - night * 0.4, 1.0 - night * 0.4, 1.0 - night * 0.3, 1.0]
                         } else {
@@ -1470,6 +1546,6 @@ mod tests {
             is_campfire: false,
         });
         assert!(g.check_solid_prop_collision(5.0, 5.0, 0.4));
-        assert!(!g.check_solid_prop_collision(50.0, 50.0, 0.4));
+        assert!(!g.check_solid_prop_collision(500.0, 500.0, 0.4));
     }
 }
