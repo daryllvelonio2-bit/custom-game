@@ -7,15 +7,53 @@ authors = ["Daryll <daryllvelonio2@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/daryllvelonio2-bit/custom-game"
 
+# The windowed binary is gated behind the `app` feature so the library target
+# (pure game logic, no wgpu/winit/rodio) can be checked, tested and linted on
+# its own in seconds. Default features keep `cargo run` and `cargo build` working
+# exactly as before.
+[features]
+default = ["app"]
+app = ["dep:custom-game-engine", "dep:env_logger"]
+
+[lib]
+name = "custom_game"
+path = "src/lib.rs"
+
 [[bin]]
 name = "custom-game"
 path = "src/main.rs"
+required-features = ["app"]
+test = false
+bench = false
 
 [dependencies]
-custom-game-engine = { path = "../custom-game-engine" }
-winit = "0.30"
-image = "0.25"
 log = "0.4"
-env_logger = "0.11"
+custom-game-engine = { path = "../custom-game-engine", optional = true }
+env_logger = { version = "0.11", optional = true }
+
+# --- Dev loop: optimised for compile speed, not frame rate -------------------
+# No debug info to write and no split-object linking work: an edit + relink
+# costs a fraction of the default `unoptimized + debuginfo` build.
+#
+# When you want a playable dev build, use `cargo run --profile dev-opt`.
+[profile.dev]
+opt-level = 0
+debug = "line-tables-only"
+incremental = true
+split-debuginfo = "unpacked"
+
+[profile.dev-opt]
+inherits = "dev"
+opt-level = 1
+
+[profile.dev-opt.package."*"]
+opt-level = 3
+
+# --- Release: unchanged, this is the shipping build -------------------------
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+strip = "symbols"
 
 [workspace]

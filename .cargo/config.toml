@@ -1,0 +1,26 @@
+# Dev-loop speed settings. Nothing here changes what release builds produce.
+#
+# `custom-game` and `custom-game-engine` are two checkouts in the same parent
+# directory; both resolve this relative path (`Documents/GitHub/custom-target`)
+# to the SAME target dir, so the engine's dependency graph is compiled once and
+# reused by the game instead of living twice in two `target/` dirs.
+[build]
+target-dir = "../custom-target"
+
+# clang + lld links markedly faster than the default GNU ld on this machine.
+[target.x86_64-unknown-linux-gnu]
+linker = "clang"
+rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+
+[alias]
+# Inner loop: seconds. `q`/`t`/`l` never touch the GPU stack.
+q = "check --lib --no-default-features"
+t = "test --lib --no-default-features"
+l = "clippy --lib --no-default-features -- -D warnings"
+# Pre-push gate: full graph, still cached and incremental.
+c = "check --all-targets"
+la = "clippy --all-targets -- -D warnings"
+r = "run"
+r-play = "run --profile dev-opt"
+b = "build"
+bt = "test --all-targets --no-run"

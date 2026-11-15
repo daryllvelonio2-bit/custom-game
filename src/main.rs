@@ -1,23 +1,27 @@
-//! Minimal starter template for custom-game built on custom-game-engine.
+//! Binary entry point: wires [`custom_game::Game`] into the engine.
+//!
+//! Keep this file thin. Logic belongs in `src/lib.rs` so it can be built and
+//! tested without pulling in wgpu/winit/rodio.
 
-use custom_game_engine::{App, AppBuilder, InitContext, RunContext};
+use custom_game_engine::{App, AppBuilder, InitContext, RunContext, wgpu};
 
-#[derive(Default)]
-struct Game {
-    frame_count: u64,
+use custom_game::Game;
+
+struct GameApp {
+    game: Game,
 }
 
-impl App for Game {
+impl App for GameApp {
     fn init(&mut self, _ctx: &mut InitContext) {
-        log::info!("Game initialized");
+        log::info!("game initialised");
     }
 
-    fn update(&mut self, _ctx: &mut RunContext) {
-        self.frame_count += 1;
+    fn update(&mut self, ctx: &mut RunContext) {
+        self.game.tick(ctx.delta);
     }
 
     fn render(&mut self, ctx: &mut RunContext) {
-        ctx.renderer.set_clear_color(custom_game_engine::wgpu::Color {
+        ctx.renderer.set_clear_color(wgpu::Color {
             r: 0.1,
             g: 0.1,
             b: 0.12,
@@ -32,17 +36,6 @@ fn main() {
         .title("Custom Game")
         .size(800, 600)
         .memory_budget_mb(100)
-        .build(Game::default())
+        .build(GameApp { game: Game::new() })
         .run();
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn game_initializes() {
-        let g = Game::default();
-        assert_eq!(g.frame_count, 0);
-    }
 }
