@@ -20,6 +20,14 @@ jobs:
           path: custom-game-engine
       - name: Move engine next to game repo
         run: mv "$GITHUB_WORKSPACE/custom-game-engine" "$GITHUB_WORKSPACE/../custom-game-engine"
+      # rodio (audio) needs ALSA headers on Linux; wgpu needs pkg-config.
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libasound2-dev \
+            pkg-config \
+            libudev-dev
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
