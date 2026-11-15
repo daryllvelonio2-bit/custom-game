@@ -2,7 +2,7 @@
 name = "custom-game"
 version = "0.1.0"
 edition = "2024"
-description = "A game built on the custom-game-engine (separate repository)."
+description = "A game built on the custom-game-engine vendored at src/custom-engine/."
 authors = ["Daryll <daryllvelonio2@gmail.com>"]
 license = "MIT"
 repository = "https://github.com/daryllvelonio2-bit/custom-game"
@@ -28,7 +28,11 @@ bench = false
 
 [dependencies]
 log = "0.4"
-custom-game-engine = { path = "../custom-game-engine", optional = true }
+# Engine crates are vendored inside `src/custom-engine/`, so the project is one
+# checkout. The engine keeps its own manifest and `[workspace]` table, which is
+# what lets it be a path dependency of this package without cargo treating it as
+# a member of this workspace.
+custom-game-engine = { path = "src/custom-engine", optional = true }
 env_logger = { version = "0.11", optional = true }
 
 # --- Dev loop: optimised for compile speed, not frame rate -------------------
@@ -56,4 +60,9 @@ lto = "thin"
 codegen-units = 1
 strip = "symbols"
 
+# One workspace, one lockfile, one shared target dir. The engine crate is a
+# member here (its source lives under `src/custom-engine/`), so profiles and
+# dependency versions are resolved once for the whole project.
 [workspace]
+members = [".", "src/custom-engine"]
+resolver = "3"

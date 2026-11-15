@@ -566,6 +566,7 @@ name = "custom-game-engine"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "env_logger",
  "glam",
  "hecs",
  "image",

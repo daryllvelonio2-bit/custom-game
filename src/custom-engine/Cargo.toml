@@ -1,0 +1,37 @@
+[package]
+name = "custom-game-engine"
+version = "0.1.0"
+edition = "2024"
+description = "A custom, low-end-optimized game engine targeting <=100 MB RAM for a full game."
+authors = ["Daryll <daryllvelonio2@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/daryllvelonio2-bit/custom-game-engine"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# Windowing and input (lightweight, no GC)
+winit = "0.30"
+# Graphics API. Defaults pull in the DX12/Metal backend code and the SPIR-V/WGSL
+# *output* backends, none of which a Linux/Vulkan build compiles or runs.
+# `wgsl` stays because the engine's shaders are WGSL source.
+wgpu = { version = "22", default-features = false, features = ["wgsl"] }
+# Math for transforms, camera, vertices
+glam = "0.25"
+# Lightweight data-oriented ECS
+hecs = "0.6"
+# Vertex buffer typing for wgpu
+bytemuck = { version = "1.15", features = ["derive"] }
+# Texture decoding: PNG only. Defaults add jpeg/gif/tiff/webp/avif/exr + rayon.
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Simple audio playback: WAV only. Defaults add flac/claxon, vorbis/lewton and
+# symphonia-mp3, which are the heaviest part of the audio graph.
+rodio = { version = "0.19", default-features = false, features = ["wav"] }
+# Async executor for wgpu device creation
+pollster = "0.3"
+# Logging
+log = "0.4"
+
+[dev-dependencies]
+env_logger = "0.11"

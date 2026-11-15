@@ -13,16 +13,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      # The engine is vendored at `src/custom-engine/` and is a workspace member,
+      # so this one checkout is all CI needs.
       - uses: actions/checkout@v4
-      # The game depends on the engine via a path dependency (`../custom-game-engine`),
-      # so the engine repo must sit next to the game repo in the runner workspace.
-      - name: Checkout engine repo
-        uses: actions/checkout@v4
-        with:
-          repository: daryllvelonio2-bit/custom-game-engine
-          path: custom-game-engine
-      - name: Move engine next to game repo
-        run: mv "$GITHUB_WORKSPACE/custom-game-engine" "$GITHUB_WORKSPACE/../custom-game-engine"
       # rodio (audio) needs ALSA headers on Linux; wgpu needs pkg-config.
       - name: Install system dependencies
         run: |
@@ -41,6 +34,6 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all --check
       - name: Run cargo check
-        run: cargo check --locked
+        run: cargo check --locked --workspace --all-targets
       - name: Run cargo test
-        run: cargo test --locked
+        run: cargo test --locked --workspace

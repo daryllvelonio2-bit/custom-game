@@ -1,9 +1,10 @@
 # Dev-loop speed settings. Nothing here changes what release builds produce.
 #
-# `custom-game` and `custom-game-engine` are two checkouts in the same parent
-# directory; both resolve this relative path (`Documents/GitHub/custom-target`)
-# to the SAME target dir, so the engine's dependency graph is compiled once and
-# reused by the game instead of living twice in two `target/` dirs.
+# The engine is vendored at `src/custom-engine/` and is a member of this
+# workspace, so the whole dependency graph resolves from this one checkout.
+# The target dir stays outside the repo (`Documents/GitHub/custom-target`) so a
+# `cargo clean` in either project does not fight the other, and so the engine's
+# standalone repo copy can reuse the same cache when it is built separately.
 [build]
 target-dir = "../custom-target"
 
