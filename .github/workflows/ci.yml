@@ -2,15 +2,24 @@ name: CI
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # The game depends on the engine via a path dependency (`../custom-game-engine`),
+      # so the engine repo must sit next to the game repo in the runner workspace.
+      - name: Checkout engine repo
+        uses: actions/checkout@v4
+        with:
+          repository: daryllvelonio2-bit/custom-game-engine
+          path: custom-game-engine
+      - name: Move engine next to game repo
+        run: mv "$GITHUB_WORKSPACE/custom-game-engine" "$GITHUB_WORKSPACE/../custom-game-engine"
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Cache cargo
